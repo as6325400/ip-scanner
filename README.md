@@ -39,7 +39,7 @@ sudo dnf install cockpit fping
 The repository includes pre-built files via CI. No build step required.
 
 ```bash
-git clone https://github.com/<your-username>/ip-scanner.git
+git clone https://github.com/as6325400/ip-scanner.git
 cd ip-scanner
 sudo make install
 ```
