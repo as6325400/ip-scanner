@@ -8,6 +8,8 @@ A [Cockpit](https://cockpit-project.org/) web console plugin for scanning and mo
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss)
 ![Cockpit](https://img.shields.io/badge/Cockpit-Plugin-0066CC)
 
+![Screenshot](image.png)
+
 ## Features
 
 - Auto-detect network interfaces and subnet calculation

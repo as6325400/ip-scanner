@@ -8,6 +8,8 @@
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss)
 ![Cockpit](https://img.shields.io/badge/Cockpit-外掛-0066CC)
 
+![截圖](image.zh-TW.png)
+
 ## 功能特色
 
 - 自動偵測網路介面與子網路計算
