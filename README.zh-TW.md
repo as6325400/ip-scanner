@@ -39,7 +39,7 @@ sudo dnf install cockpit fping
 本專案透過 CI 自動建置，使用者不需要自行編譯。
 
 ```bash
-git clone https://github.com/<your-username>/ip-scanner.git
+git clone https://github.com/as6325400/ip-scanner.git
 cd ip-scanner
 sudo make install
 ```
