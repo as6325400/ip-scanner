@@ -15,9 +15,11 @@ A [Cockpit](https://cockpit-project.org/) web console plugin for scanning and mo
 - Auto-detect network interfaces and subnet calculation
 - Active ping scan using `fping` (with `ping` fallback)
 - MAC-based device deduplication (IPv4 + IPv6 same MAC = one device)
-- State filter chips (Reachable / Stale) with color-coded status
+- Reverse DNS hostname resolution via interface-specific DNS server
+- Local machine detection (shown as LOCAL state)
+- State filter chips (Reachable / Stale / Local) with color-coded status
 - IPv4 / IPv6 protocol toggle
-- Real-time search by IP, MAC, or state
+- Real-time search by IP, hostname, MAC, or state
 - Scan progress bar with phase indicator
 - LocalStorage cache for interface selection and scan results
 - Auto-rescan when cached data is older than 5 minutes
@@ -26,14 +28,15 @@ A [Cockpit](https://cockpit-project.org/) web console plugin for scanning and mo
 ## Requirements
 
 - Linux server with [Cockpit](https://cockpit-project.org/) installed
+- `dnsutils` (provides `dig`) for hostname resolution
 - Optional: `fping` for faster scanning
 
 ```bash
 # Ubuntu / Debian
-sudo apt install cockpit fping
+sudo apt install cockpit fping dnsutils
 
 # RHEL / Fedora
-sudo dnf install cockpit fping
+sudo dnf install cockpit fping bind-utils
 ```
 
 ## Installation
@@ -96,9 +99,10 @@ ip-scanner/
 
 1. **Interface Detection**: Uses `ip -j link` / `ip -j addr` via `cockpit.spawn()` to list active network interfaces and calculate subnets.
 2. **Scanning**: Runs `fping -a -g <subnet>` to ping all hosts in the subnet. Falls back to a parallel `ping` loop if `fping` is not installed.
-3. **Neighbor Collection**: After a 2-second settling delay, reads the ARP/NDP table with `ip -j neigh show dev <iface>` and groups entries by MAC address.
-4. **Caching**: Stores scan results in `localStorage`. On page reload, restores cached data and auto-rescans if the cache is older than 5 minutes.
-5. **i18n**: Detects language from `CockpitLang` cookie > `cockpit.language` > `navigator.language`, with English as fallback.
+3. **Neighbor Collection**: After a 2-second settling delay, reads the ARP/NDP table with `ip -j neigh show dev <iface>` and groups entries by MAC address. The local machine is also added to the list with a `LOCAL` state.
+4. **Hostname Resolution**: Detects the DNS server for the selected interface (via `resolvectl` / `nmcli` / `/etc/resolv.conf`) and performs reverse DNS lookups (`dig -x`) for each discovered IP. Hostnames are resolved in parallel and displayed progressively as results come in.
+5. **Caching**: Stores scan results (including hostnames) in `localStorage`. On page reload, restores cached data and auto-rescans if the cache is older than 5 minutes.
+6. **i18n**: Detects language from `CockpitLang` cookie > `cockpit.language` > `navigator.language`, with English as fallback.
 
 ## Tech Stack
 

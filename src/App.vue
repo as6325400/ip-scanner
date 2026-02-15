@@ -11,7 +11,7 @@ const selectedIface = ref('')
 const subnet = ref('')
 const neighbors = ref([])
 const searchQuery = ref('')
-const selectedStates = ref(['REACHABLE'])
+const selectedStates = ref(['REACHABLE', 'LOCAL'])
 const showIPv4 = ref(true)
 const showIPv6 = ref(false)
 const scanning = ref(false)
@@ -163,6 +163,21 @@ async function loadNeighbors() {
       }
     }
 
+    // Add local machine to the list
+    try {
+      const addrRaw = await cockpitSpawn(['ip', '-j', 'addr', 'show', selectedIface.value])
+      const addrData = JSON.parse(addrRaw)
+      const iface = addrData[0]
+      if (iface) {
+        const localMac = iface.address
+        const localIpv4 = iface.addr_info?.find((a) => a.family === 'inet')?.local
+        const localIpv6 = iface.addr_info?.find((a) => a.family === 'inet6' && !a.local.startsWith('fe80'))?.local
+        if (localMac && (localIpv4 || localIpv6)) {
+          byMac.set(localMac, { mac: localMac, ipv4: localIpv4 || null, ipv6: localIpv6 || null, state: 'LOCAL' })
+        }
+      }
+    } catch { /* ignore */ }
+
     neighbors.value = [...byMac.values()]
       .map((d) => ({
         ip: d.ipv4 || d.ipv6,
@@ -191,6 +206,58 @@ async function loadNeighbors() {
 function ipToNum(ip) {
   const p = ip.split('.').map(Number)
   return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]
+}
+
+async function getDnsServer(iface) {
+  // Try resolvectl first (systemd-resolved)
+  try {
+    const raw = await cockpitSpawn(['resolvectl', 'dns', iface])
+    const match = raw.match(/:\s*(.+)/)
+    if (match) {
+      const server = match[1].trim().split(/\s+/)[0]
+      if (server) return server
+    }
+  } catch { /* ignore */ }
+
+  // Fallback: nmcli
+  try {
+    const raw = await cockpitSpawn(['nmcli', 'dev', 'show', iface])
+    const match = raw.match(/IP4\.DNS\[1\]:\s*(\S+)/)
+    if (match) return match[1]
+  } catch { /* ignore */ }
+
+  // Fallback: /etc/resolv.conf (system default)
+  try {
+    const raw = await cockpitSpawn(['bash', '-c', "grep '^nameserver' /etc/resolv.conf | head -1 | awk '{print $2}'"])
+    const server = raw.trim()
+    if (server) return server
+  } catch { /* ignore */ }
+
+  return null
+}
+
+async function resolveHostname(ip, dnsServer) {
+  try {
+    const args = dnsServer
+      ? ['dig', '-x', ip, '@' + dnsServer, '+short', '+timeout=2', '+tries=1']
+      : ['dig', '-x', ip, '+short', '+timeout=2', '+tries=1']
+    const raw = await cockpitSpawn(args)
+    const hostname = raw.trim().replace(/\.$/, '')
+    return hostname || ''
+  } catch {
+    return ''
+  }
+}
+
+async function resolveAllHostnames(neighborsList, dnsServer) {
+  await Promise.allSettled(
+    neighborsList.map(async (n) => {
+      const ip = n.ipv4 || n.ipv6
+      if (ip) {
+        n.hostname = await resolveHostname(ip, dnsServer)
+      }
+    })
+  )
 }
 
 async function startScan() {
@@ -238,8 +305,14 @@ async function startScan() {
 
     // Wait for ARP table to settle before collecting
     await new Promise((r) => setTimeout(r, 2000))
-    scanProgress.value = 95
+    scanProgress.value = 90
     await loadNeighbors()
+
+    scanProgress.value = 95
+    scanPhase.value = t('resolvingHostnames')
+    const dnsServer = await getDnsServer(selectedIface.value)
+    await resolveAllHostnames(neighbors.value, dnsServer)
+    saveCache()
 
     scanProgress.value = 100
     scanPhase.value = t('complete')
@@ -295,7 +368,8 @@ const filteredNeighbors = computed(() => {
         (n.ipv4 && n.ipv4.toLowerCase().includes(q)) ||
         (n.ipv6 && n.ipv6.toLowerCase().includes(q)) ||
         n.mac.toLowerCase().includes(q) ||
-        n.state.toLowerCase().includes(q)
+        n.state.toLowerCase().includes(q) ||
+        (n.hostname && n.hostname.toLowerCase().includes(q))
     )
   }
 
@@ -310,6 +384,7 @@ const stats = computed(() => {
 })
 
 function stateClass(state) {
+  if (state === 'LOCAL') return 'text-blue-600 bg-blue-50 border-blue-200'
   if (state === 'REACHABLE') return 'text-green-600 bg-green-50 border-green-200'
   if (state === 'STALE') return 'text-orange-600 bg-orange-50 border-orange-200'
   return 'text-gray-600 bg-gray-50 border-gray-200'
@@ -317,6 +392,7 @@ function stateClass(state) {
 
 function stateFilterClass(state) {
   const active = selectedStates.value.includes(state)
+  if (state === 'LOCAL') return active ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-gray-500 border-gray-200'
   if (state === 'REACHABLE') return active ? 'bg-green-100 text-green-700 border-green-300' : 'bg-white text-gray-500 border-gray-200'
   if (state === 'STALE') return active ? 'bg-orange-100 text-orange-700 border-orange-300' : 'bg-white text-gray-500 border-gray-200'
   return active ? 'bg-gray-200 text-gray-700 border-gray-400' : 'bg-white text-gray-500 border-gray-200'
@@ -487,16 +563,17 @@ onMounted(() => {
               <tr class="bg-gray-50 border-b border-gray-200">
                 <th class="text-left px-4 py-3 font-medium text-gray-600">#</th>
                 <th class="text-left px-4 py-3 font-medium text-gray-600">{{ t('ipAddress') }}</th>
+                <th class="text-left px-4 py-3 font-medium text-gray-600">{{ t('hostname') }}</th>
                 <th class="text-left px-4 py-3 font-medium text-gray-600">{{ t('macAddress') }}</th>
                 <th class="text-left px-4 py-3 font-medium text-gray-600">{{ t('state') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="loading" class="border-b border-gray-100">
-                <td colspan="4" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td>
+                <td colspan="5" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td>
               </tr>
               <tr v-else-if="filteredNeighbors.length === 0" class="border-b border-gray-100">
-                <td colspan="4" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="5" class="px-4 py-8 text-center text-gray-400">
                   {{ neighbors.length === 0 ? t('noDevices') : t('noResults') }}
                 </td>
               </tr>
@@ -509,6 +586,10 @@ onMounted(() => {
                 <td class="px-4 py-3 font-mono">
                   <div v-if="n.ipv4" class="text-gray-900">{{ n.ipv4 }}</div>
                   <div v-if="n.ipv6 && showIPv6" class="text-gray-500 text-xs">{{ n.ipv6 }}</div>
+                </td>
+                <td class="px-4 py-3 text-gray-700">
+                  <span v-if="n.hostname" class="text-blue-700">{{ n.hostname }}</span>
+                  <span v-else class="text-gray-300">—</span>
                 </td>
                 <td class="px-4 py-3 font-mono text-gray-700">{{ n.mac }}</td>
                 <td class="px-4 py-3">

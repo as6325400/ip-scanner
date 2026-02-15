@@ -15,9 +15,11 @@
 - 自動偵測網路介面與子網路計算
 - 使用 `fping` 進行主動掃描（未安裝時自動改用 `ping`）
 - MAC 位址裝置去重（同一 MAC 的 IPv4 + IPv6 視為一台裝置）
-- 狀態篩選器（可連線 / 已過期），以顏色區分
+- 反向 DNS 主機名稱解析（自動使用該網卡的 DNS Server 查詢）
+- 本機偵測（以 LOCAL 狀態顯示）
+- 狀態篩選器（可連線 / 已過期 / 本機），以顏色區分
 - IPv4 / IPv6 協定切換
-- 即時搜尋（依 IP、MAC 或狀態）
+- 即時搜尋（依 IP、主機名稱、MAC 或狀態）
 - 掃描進度條與階段指示
 - LocalStorage 快取介面選擇與掃描結果
 - 快取資料超過 5 分鐘自動重新掃描
@@ -26,14 +28,15 @@
 ## 系統需求
 
 - 已安裝 [Cockpit](https://cockpit-project.org/) 的 Linux 伺服器
+- `dnsutils`（提供 `dig` 指令）用於主機名稱解析
 - 選用：`fping`（可加速掃描）
 
 ```bash
 # Ubuntu / Debian
-sudo apt install cockpit fping
+sudo apt install cockpit fping dnsutils
 
 # RHEL / Fedora
-sudo dnf install cockpit fping
+sudo dnf install cockpit fping bind-utils
 ```
 
 ## 安裝方式
@@ -96,9 +99,10 @@ ip-scanner/
 
 1. **介面偵測**：透過 `cockpit.spawn()` 執行 `ip -j link` / `ip -j addr`，列出作用中的網路介面並計算子網路。
 2. **掃描**：執行 `fping -a -g <子網路>` 對所有主機進行 ping。若未安裝 `fping`，則自動改用並行 `ping` 迴圈。
-3. **鄰居收集**：等待 2 秒讓 ARP 表穩定後，透過 `ip -j neigh show dev <介面>` 讀取 ARP/NDP 表，並依 MAC 位址合併。
-4. **快取**：將掃描結果存入 `localStorage`。重新載入頁面時還原快取資料，若快取超過 5 分鐘則自動重新掃描。
-5. **多語系**：語言偵測優先順序為 `CockpitLang` cookie > `cockpit.language` > `navigator.language`，預設使用英文。
+3. **鄰居收集**：等待 2 秒讓 ARP 表穩定後，透過 `ip -j neigh show dev <介面>` 讀取 ARP/NDP 表，並依 MAC 位址合併。本機也會以 `LOCAL` 狀態加入列表。
+4. **主機名稱解析**：自動偵測該網卡的 DNS Server（依序嘗試 `resolvectl` / `nmcli` / `/etc/resolv.conf`），並對每個 IP 進行反向 DNS 查詢（`dig -x`）。所有查詢並行執行，結果即時顯示於畫面。
+5. **快取**：將掃描結果（含主機名稱）存入 `localStorage`。重新載入頁面時還原快取資料，若快取超過 5 分鐘則自動重新掃描。
+6. **多語系**：語言偵測優先順序為 `CockpitLang` cookie > `cockpit.language` > `navigator.language`，預設使用英文。
 
 ## 技術堆疊
 
